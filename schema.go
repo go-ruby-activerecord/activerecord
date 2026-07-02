@@ -35,6 +35,10 @@ func CreateTable(dialect Dialect, name string) *TableDef {
 // NoPrimaryKey disables the implicit primary key (create_table id:false).
 func (t *TableDef) NoPrimaryKey() *TableDef { t.pk = ""; return t }
 
+// PrimaryKey sets the primary-key column name (create_table primary_key: :name
+// / id: :name), replacing the default "id".
+func (t *TableDef) PrimaryKey(name string) *TableDef { t.pk = name; return t }
+
 // ColOpt configures a column in a table definition.
 type ColOpt func(*colDef)
 

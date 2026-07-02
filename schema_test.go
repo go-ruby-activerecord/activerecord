@@ -21,6 +21,10 @@ func TestCreateTableSQLite(t *testing.T) {
 	// limit option accepted (no visible effect for sqlite varchar).
 	l := CreateTable(SQLite, "t").NoPrimaryKey().Column("n", "string", Limit(20))
 	eq(t, "limit", l.ToSQL(), `CREATE TABLE "t" ("n" varchar)`)
+	// custom primary-key column name (create_table primary_key: :uuid).
+	pk := CreateTable(SQLite, "docs").PrimaryKey("uuid").Column("body", "text")
+	eq(t, "pk", pk.ToSQL(),
+		`CREATE TABLE "docs" ("uuid" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "body" text)`)
 }
 
 func TestCreateTablePerDialect(t *testing.T) {
