@@ -159,16 +159,19 @@ func (m *Model) throughJoin(kind string, a *Association) []string {
 	}
 	// First hop: self -> intermediate (as has_many).
 	first := m.hasManyJoin(kind, mid)
-	// Second hop: intermediate -> target. The target's foreign key on the
-	// intermediate table (has_many) or the intermediate's fk to target
-	// (belongs_to) — use the has_many convention (target has <mid_singular>_id)
-	// unless the target is reached via belongs_to on the intermediate.
+	// Second hop follows the "source" reflection: how the *intermediate* model
+	// associates to the target. When the intermediate belongs_to the target the
+	// FK lives on the intermediate (target.pk = mid.fk); otherwise the target
+	// holds the FK (has_many/has_one: target.<mid_singular>_id = mid.pk).
 	var on string
-	if fk := tgt.belongsToFKTo(midModel); fk != "" {
+	if fk := midModel.belongsToFKTo(tgt); fk != "" {
 		on = m.Dialect.qualify(tgt.TableName, tgt.PrimaryKey) + " = " +
 			m.Dialect.qualify(midModel.TableName, fk)
 	} else {
 		fk = underscoreClass(midModel.Name) + "_id"
+		if src := midModel.hasManyTo(tgt); src != nil && src.ForeignKey != "" {
+			fk = src.ForeignKey
+		}
 		on = m.Dialect.qualify(tgt.TableName, fk) + " = " +
 			m.Dialect.qualify(midModel.TableName, midModel.PrimaryKey)
 	}
@@ -185,6 +188,16 @@ func (m *Model) belongsToFKTo(target *Model) string {
 		}
 	}
 	return ""
+}
+
+// hasManyTo returns m's has_many/has_one association targeting target, or nil.
+func (m *Model) hasManyTo(target *Model) *Association {
+	for _, a := range m.associations {
+		if (a.Kind == HasMany || a.Kind == HasOne) && a.ClassName == target.Name {
+			return a
+		}
+	}
+	return nil
 }
 
 // habtmJoin: JOIN the join table then the target, per ActiveRecord's HABTM.

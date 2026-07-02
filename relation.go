@@ -26,13 +26,11 @@ type Relation struct {
 	groups    []string // rendered group columns
 	orders    []string // rendered "col" ASC fragments
 	joins     []string // rendered JOIN clauses
-	fromTable string   // overrides model.TableName when set
+	fromTable string   // overrides model.TableName when set (From)
 
-	limit    *int
-	offset   *int
-	lockOne  bool // internal: first/find_by add LIMIT 1
-	reverse  bool // last: reverse default order
-	distinctReset bool
+	limit   *int
+	offset  *int
+	reverse bool // last: reverse default order
 }
 
 // clone returns a shallow copy with independently-appendable slices.
@@ -192,6 +190,14 @@ func (r *Relation) Offset(n int) *Relation {
 	c := r.clone()
 	c.offset = &n
 	return c
+}
+
+// From overrides the FROM table name (ActiveRecord's Model.from("table")),
+// keeping the model's column qualification. An empty name clears the override.
+func (r *Relation) From(table string) *Relation {
+	n := r.clone()
+	n.fromTable = table
+	return n
 }
 
 // Joins adds INNER JOINs for the named associations (Symbol/string), rendering

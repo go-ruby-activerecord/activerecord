@@ -9,20 +9,20 @@ import "strings"
 // TableDef accumulates a create_table definition, emitting the CREATE TABLE DDL
 // ActiveRecord's schema statements produce for the dialect.
 type TableDef struct {
-	dialect  Dialect
-	name     string
-	pk       string // primary-key column name; "" disables the implicit PK
-	cols     []colDef
+	dialect Dialect
+	name    string
+	pk      string // primary-key column name; "" disables the implicit PK
+	cols    []colDef
 }
 
 type colDef struct {
-	name     string
-	typ      string
-	null     bool // true when NULL is allowed (default); NOT NULL emitted when false
-	notNull  bool // explicit null:false
-	hasDef   bool
-	def      Value
-	limit    int
+	name      string
+	typ       string
+	null      bool // true when NULL is allowed (default); NOT NULL emitted when false
+	notNull   bool // explicit null:false
+	hasDef    bool
+	def       Value
+	limit     int
 	precision int
 }
 

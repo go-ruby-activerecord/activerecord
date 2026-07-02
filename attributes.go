@@ -214,6 +214,9 @@ func castFloat(v any) any {
 		return float64(x)
 	case int64:
 		return float64(x)
+	case *big.Int:
+		f, _ := new(big.Float).SetInt(x).Float64()
+		return f
 	case string:
 		if f, err := strconv.ParseFloat(strings.TrimSpace(x), 64); err == nil {
 			return f

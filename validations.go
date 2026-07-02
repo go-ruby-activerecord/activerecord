@@ -23,9 +23,9 @@ type validation struct {
 // lists plus the full_messages rendering ("Attr message"). Attributes and
 // messages are kept in declaration/insertion order to match ActiveRecord.
 type Errors struct {
-	model    *Model
-	attrs    []string            // attribute insertion order
-	byAttr   map[string][]string // attribute => messages
+	model  *Model
+	attrs  []string            // attribute insertion order
+	byAttr map[string][]string // attribute => messages
 }
 
 func newErrors(m *Model) *Errors {
@@ -143,15 +143,15 @@ func (m *Model) ValidatesFormat(attr string, with *regexp.Regexp) *Model {
 
 // NumericalityOpts configures a numericality validator.
 type NumericalityOpts struct {
-	OnlyInteger      bool
-	GreaterThan      *float64
-	GreaterThanOrEq  *float64
-	LessThan         *float64
-	LessThanOrEq     *float64
-	EqualTo          *float64
-	Other            *float64 // other_than
-	Odd              bool
-	Even             bool
+	OnlyInteger     bool
+	GreaterThan     *float64
+	GreaterThanOrEq *float64
+	LessThan        *float64
+	LessThanOrEq    *float64
+	EqualTo         *float64
+	Other           *float64 // other_than
+	Odd             bool
+	Even            bool
 }
 
 // ValidatesNumericality adds a numericality validator.
