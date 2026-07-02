@@ -18,6 +18,45 @@ func TestUnderscore(t *testing.T) {
 	}
 }
 
+func TestPluralize(t *testing.T) {
+	cases := map[string]string{
+		// default +s
+		"user": "users", "line_item": "line_items", "account": "accounts",
+		// consonant + y -> ies (and vowel + y stays +s)
+		"category": "categories", "day": "days",
+		// s/x/z/ch/sh -> es
+		"bus": "buses", "box": "boxes", "buzz": "buzzes",
+		"branch": "branches", "dish": "dishes",
+		// the explicit -oes set; every other -o word takes plain +s
+		"hero": "heroes", "tomato": "tomatoes",
+		"studio": "studios", "photo": "photos", "gizmo": "gizmos",
+		// irregulars
+		"person": "people", "man": "men", "child": "children",
+		"mouse": "mice", "ox": "oxen", "zombie": "zombies",
+		// uncountable
+		"sheep": "sheep", "series": "series", "equipment": "equipment",
+		// empty
+		"": "",
+	}
+	for in, want := range cases {
+		if got := Pluralize(in); got != want {
+			t.Errorf("Pluralize(%q) = %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestTableize(t *testing.T) {
+	cases := map[string]string{
+		"User": "users", "LineItem": "line_items", "Admin::Account": "accounts",
+		"Category": "categories", "Person": "people", "": "",
+	}
+	for in, want := range cases {
+		if got := Tableize(in); got != want {
+			t.Errorf("Tableize(%q) = %q want %q", in, got, want)
+		}
+	}
+}
+
 func TestHumanize(t *testing.T) {
 	cases := map[string]string{
 		"first_name": "First name", "company_id": "Company", "name": "Name",
