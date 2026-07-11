@@ -22,6 +22,19 @@ type Record struct {
 	original map[string]any
 	// order preserves attribute insertion order for deterministic Changes keys.
 	order []string
+
+	// persisted is true when the record corresponds to a database row (loaded or
+	// after a successful insert), driving Save's INSERT-vs-UPDATE choice, exactly
+	// as ActiveRecord's @new_record flag does (inverted).
+	persisted bool
+	// destroyed is true after a successful Destroy.
+	destroyed bool
+	// errs holds the validation errors from the most recent Save/Valid call.
+	errs *Errors
+	// loaded holds eager-loaded association targets keyed by association name
+	// (see preload.go), the pure-Go equivalent of ActiveRecord's association
+	// target cache populated by includes/preload.
+	loaded map[string][]*Record
 }
 
 // Build returns a new Record with the given initial attributes (Model.new),
@@ -50,7 +63,30 @@ func (m *Model) Load(attrs map[string]any) *Record {
 	for k, v := range r.attrs {
 		r.original[k] = v
 	}
+	r.persisted = true
 	return r
+}
+
+// IsPersisted reports whether the record corresponds to a stored row
+// (ActiveRecord's persisted?): true after Load or a successful insert, false for
+// a freshly Built record and after Destroy.
+func (r *Record) IsPersisted() bool { return r.persisted && !r.destroyed }
+
+// IsNewRecord reports whether the record has not yet been inserted
+// (ActiveRecord's new_record?).
+func (r *Record) IsNewRecord() bool { return !r.persisted }
+
+// IsDestroyed reports whether the record was destroyed (ActiveRecord's
+// destroyed?).
+func (r *Record) IsDestroyed() bool { return r.destroyed }
+
+// Errors returns the validation errors from the most recent Validate/Save/Valid
+// call (an empty Errors set before any run), matching record.errors.
+func (r *Record) Errors() *Errors {
+	if r.errs == nil {
+		r.errs = newErrors(r.model)
+	}
+	return r.errs
 }
 
 // Set writes an attribute, type-casting to the column type. Unknown attributes
@@ -142,8 +178,12 @@ func (r *Record) SaveClean() {
 	}
 }
 
-// Validate runs the model's validators against this record.
-func (r *Record) Validate() *Errors { return r.model.Validate(r) }
+// Validate runs the model's validators against this record and caches the result
+// on the record (readable via [Record.Errors], like record.errors after valid?).
+func (r *Record) Validate() *Errors {
+	r.errs = r.model.Validate(r)
+	return r.errs
+}
 
 // Valid reports whether the record passes all validations.
 func (r *Record) Valid() bool { return r.Validate().Empty() }

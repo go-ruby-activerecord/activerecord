@@ -81,13 +81,22 @@ func (m *Model) hashPredicate(col string, v Value, neg bool) string {
 }
 
 // inPredicate renders an IN / NOT IN list. An empty list matches ActiveRecord:
-// IN (NULL) for empty, negated to a tautology 1=1.
+// IN (NULL) for empty, negated to a tautology 1=1. A single-element list is
+// collapsed to a plain =/!= comparison, exactly as ActiveRecord 7+ optimizes a
+// one-element array condition.
 func (m *Model) inPredicate(q string, list []any, neg bool) string {
 	if len(list) == 0 {
 		if neg {
 			return "1=1"
 		}
 		return q + " IN (NULL)"
+	}
+	if len(list) == 1 {
+		op := " = "
+		if neg {
+			op = " != "
+		}
+		return q + op + m.Dialect.quote(list[0])
 	}
 	parts := make([]string, len(list))
 	for i, v := range list {
