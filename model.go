@@ -4,7 +4,10 @@
 
 package activerecord
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Column is one column of a model's table: its name and its logical type (used
 // for DDL emission and attribute type-casting). Type is an ActiveRecord type
@@ -39,6 +42,24 @@ type Model struct {
 	validations  []validation
 	scopes       map[string]func(*Relation) *Relation
 	models       map[string]*Model // sibling models by class name, for joins
+	callbacks    [][]Callback      // lifecycle hooks, indexed by callbackKind
+
+	// defaultScope, when set, refines every relation started from the model
+	// (ActiveRecord's default_scope); Unscoped bypasses it.
+	defaultScope func(*Relation) *Relation
+
+	// Single-table-inheritance wiring (see sti.go). typeColumn is the
+	// discriminator column ("type" by default) when the model participates in
+	// STI; typeName is this class's discriminator value; subtypes lists the
+	// discriminator values of descendant classes (for the base-class filter).
+	typeColumn    string
+	typeName      string
+	subtypes      []string
+	base          *Model
+	subtypeModels map[string]*Model
+
+	// stmts caches this model's prepared statements (see statement_cache.go).
+	stmts *StatementCache
 }
 
 // NewModel returns a Model for class name with the given table and columns. The
@@ -122,5 +143,24 @@ func (m *Model) starSelect() string {
 // [Relation.Scope] (or the generated shortcut a host wires) applies it.
 func (m *Model) Scope(name string, body func(*Relation) *Relation) *Model {
 	m.scopes[strings.TrimSpace(name)] = body
+	return m
+}
+
+// ScopeNames returns the registered named-scope names in sorted order.
+func (m *Model) ScopeNames() []string {
+	out := make([]string, 0, len(m.scopes))
+	for k := range m.scopes {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// DefaultScope registers the model's default_scope: a refinement applied to
+// every relation started with [Model.All] (and the Where/Order/… shortcuts).
+// [Model.Unscoped] bypasses it. Registering twice replaces the previous one,
+// matching a single default_scope declaration.
+func (m *Model) DefaultScope(body func(*Relation) *Relation) *Model {
+	m.defaultScope = body
 	return m
 }

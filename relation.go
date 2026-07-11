@@ -31,6 +31,9 @@ type Relation struct {
 	limit   *int
 	offset  *int
 	reverse bool // last: reverse default order
+
+	includes []string // association names to eager-load (see preload.go)
+	unscoped bool     // when set, the model's default_scope is not applied
 }
 
 // clone returns a shallow copy with independently-appendable slices.
@@ -42,11 +45,30 @@ func (r *Relation) clone() *Relation {
 	n.groups = append([]string(nil), r.groups...)
 	n.orders = append([]string(nil), r.orders...)
 	n.joins = append([]string(nil), r.joins...)
+	n.includes = append([]string(nil), r.includes...)
 	return &n
 }
 
-// All returns an unrefined Relation over the model (ActiveRecord's Model.all).
-func (m *Model) All() *Relation { return &Relation{model: m} }
+// All returns a Relation over the model (ActiveRecord's Model.all), with the
+// model's default_scope and single-table-inheritance type condition applied — the
+// baseline every Model shortcut (Where/Order/…) starts from. Use
+// [Model.Unscoped] to obtain a relation with neither.
+func (m *Model) All() *Relation {
+	r := &Relation{model: m}
+	if m.defaultScope != nil {
+		r = m.defaultScope(r)
+	}
+	return m.applyTypeCondition(r)
+}
+
+// Unscoped returns a bare relation that ignores the model's default_scope and STI
+// type condition (ActiveRecord's Model.unscoped), the escape hatch for querying
+// every row of the table.
+func (m *Model) Unscoped() *Relation {
+	n := &Relation{model: m}
+	n.unscoped = true
+	return n
+}
 
 // Where refines the relation with a condition. The shortcut on Model starts a
 // fresh relation.

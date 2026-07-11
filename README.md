@@ -7,29 +7,33 @@
 [![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-1a7f37)](#tests--coverage)
 
-**A pure-Go (no cgo) reimplementation of the deterministic core of Rails'
+**A pure-Go (no cgo) reimplementation of Rails'
 [ActiveRecord](https://guides.rubyonrails.org/active_record_basics.html) ORM** —
-the query-building, schema-DDL, association, validation and attribute layers that
-turn a model + relation description into SQL and run validations, exactly as
-MRI's `activerecord` gem does. The one thing that genuinely needs a database —
-executing the SQL — is an injected **Adapter** host seam (wired to
+the query-building, schema-DDL, association, validation, attribute, persistence,
+transaction, callback, eager-loading and single-table-inheritance layers that
+turn a model + relation description into SQL, run it, and materialize records,
+exactly as MRI's `activerecord` gem does. The one thing that genuinely needs a
+database — talking to the wire — is an injected **Adapter** host seam (wired to
 [go-ruby-sqlite3](https://github.com/go-ruby-sqlite3/sqlite3) /
 [go-ruby-pg](https://github.com/go-ruby-pg/pg)), so this module stays 100%
 Ruby- and CGO-free and produces SQL a differential oracle compares to
-ActiveRecord's own `Relation#to_sql` **byte-for-byte**.
+ActiveRecord's own output **byte-for-byte**.
 
 It is the ORM backend for
 [go-embedded-ruby](https://github.com/go-embedded-ruby/ruby), a sibling of
 [go-ruby-sequel](https://github.com/go-ruby-sequel/sequel) (whose dialect
 approach it shares), and a **standalone, reusable** module.
 
-> **What it is — and isn't.** Building the SQL string for a relation
-> (`where`/`order`/`joins`/aggregates/…), the migration DDL, the association join
-> geometry, and the validation logic + message text is fully deterministic and
-> needs **no interpreter and no live database** — so it lives here as pure Go.
-> Actually running the statements, connection pooling, transaction *execution*,
-> the full callback chain and STI edge cases are the host's job; this library
-> renders the SQL and exposes an [`Adapter`](adapter.go) the host implements.
+> **The database seam.** Every SQL string this library produces — relation
+> `to_sql`, the migration DDL, the association join geometry, the INSERT/UPDATE/
+> DELETE for a save, the transaction and savepoint control, the eager-load
+> queries and the prepared-statement templates — is rendered deterministically
+> and byte-faithfully to ActiveRecord. The bytes are run through an
+> [`Adapter`](adapter.go) the host implements over its driver; connection pooling
+> and the actual socket I/O are the driver's job. Everything else ActiveRecord
+> does around those bytes — validations, the full callback chain, transactions
+> with nested savepoints, statement caching, eager loading and STI instantiation
+> — lives here.
 
 ## Features
 
@@ -58,6 +62,34 @@ the real `activerecord` gem on every supported platform.
   ActiveRecord's default message text and `full_messages` order.
 - **Attributes** — readers/writers, per-column type casting, and dirty tracking
   (`Changed`/`Changes`/`AttributeChanged`) like `ActiveModel::Dirty`.
+- **Persistence** — `Save`/`Create`/`Update`/`Destroy`/`Delete` execute the
+  column-ordered INSERT/UPDATE/DELETE (with the `RETURNING` clause and the
+  `created_at`/`updated_at` timestamping ActiveRecord applies), assign the
+  generated primary key, and reset dirty state — all through the `Adapter`.
+- **Callbacks** — the full `before/after` lifecycle for validation, save, create,
+  update, destroy and the transactional `after_commit`/`after_rollback`, fired in
+  ActiveSupport's order (before forward, after LIFO) with `throw :abort`
+  (`ErrAbort`) halting semantics.
+- **Transactions** — real `BEGIN`/`COMMIT`/`ROLLBACK` with nested `SAVEPOINT
+  active_record_N`/`RELEASE`/`ROLLBACK TO`, an `ErrRollback` sentinel, and
+  panic-safe unwinding; a save inside a `Transaction` automatically runs on a
+  savepoint.
+- **Statement cache** — a `StatementCache` of prepared `find`/`find_by`
+  statements (`… = ? LIMIT ?`, `$n` on postgres) with a `PreparedAdapter` seam
+  for true driver-level prepares and a transparent inline fallback.
+- **Eager loading** — `Includes`/`Preload` run ActiveRecord's N+1-avoiding
+  multi-query fetch for `belongs_to`/`has_many`/`has_one`/HABTM/`:through` and
+  attach the targets to each record.
+- **Query interface** — executable `ToArray`/`Pluck`/`Ids`/`Exists`/`Count`/
+  `First`/`Last`/`Take`/`FindRecord`/`FindByRecord`/`FindEach`, plus named
+  `Scope`s, `DefaultScope` and `Unscoped`.
+- **Single-table inheritance** — `STI`/`Subclass` add ActiveRecord's exact type
+  condition (`type = 'Admin'`, or `IN (…)` over descendants) and instantiate rows
+  as the subclass named by the discriminator column.
+- **Migrations** — a `Migrator` runs migrations through the adapter with a
+  `schema_migrations` version ledger (idempotent up/rollback in a transaction),
+  plus `DropTable`/`RemoveColumn`/`RenameColumn`/`ChangeColumnNull`/`RemoveIndex`/
+  `AddTimestamps` DDL.
 - **Three dialects** — SQLite, PostgreSQL and MySQL identifier quoting and value
   literalization, selectable per model.
 
@@ -135,22 +167,46 @@ type Adapter interface {
 
 `ValidatesUniqueness(attr, exists)` takes a callback the host wires to
 `Exists(adapter, relation)` so the one query-dependent validator stays behind the
-seam too.
+seam too. A host that offers driver-level prepared statements additionally
+implements [`PreparedAdapter`](statement_cache.go) so the statement cache binds
+values out-of-band; otherwise the binds are transparently inlined.
 
-## Scope & what's deferred
+## Persistence, transactions & the lifecycle
 
-This is the **deterministic core**. Documented host seams / deferred: statement
-execution, connection pooling, transaction *execution*, the full `before/after`
-callback chain execution (registration is a host concern; bodies run in `rbgo`),
-STI edge cases, and eager-loading materialization (`includes` query *planning*
-lives here; the multi-query fetch is the host's).
+Saving, transactions and eager loading run through the same `Adapter`:
+
+```go
+u, _ := users.Create(adapter, map[string]any{"name": "bob", "age": 30})
+// BEGIN immediate TRANSACTION
+// INSERT INTO "users" ("name","age","created_at","updated_at")
+//   VALUES ('bob',30,'…','…') RETURNING "id"    → u.Get("id")
+// COMMIT TRANSACTION
+
+ar.Transaction(adapter, func() error {          // nests as SAVEPOINT active_record_1
+	u.Update(adapter, map[string]any{"age": 31})
+	return ar.ErrRollback                        // ROLLBACK TO SAVEPOINT …
+})
+
+posts, _ := ar.LoadIncludes(adapter, users.All().Includes("posts"))
+// SELECT "users".* FROM "users"
+// SELECT "posts".* FROM "posts" WHERE "posts"."user_id" IN (…)
+```
+
+Single-table inheritance (`base.STI("type")`, `admin := base.Subclass("Admin")`)
+adds `WHERE "users"."type" = 'Admin'` to the subclass's queries and instantiates
+rows as the subclass. Migrations run through a `Migrator` with an idempotent
+`schema_migrations` ledger.
 
 ## The oracle
 
 The test suite runs the real `activerecord` gem (version-gated
-`RUBY_VERSION >= "4.0"`) against an in-memory SQLite connection and compares
-`Relation#to_sql`, `errors.full_messages`, and the schema DDL to this package's
-output **byte-for-byte**. The deterministic, Ruby-free golden vectors alone keep
+`RUBY_VERSION >= "4.0"`) against an in-memory SQLite connection and compares this
+package's output **byte-for-byte** to ActiveRecord's — not just `Relation#to_sql`,
+`errors.full_messages` and the schema DDL, but also the INSERT/UPDATE/DELETE a
+save issues, the `BEGIN`/`SAVEPOINT`/`COMMIT` control sequence, the prepared
+`find`/`find_by` templates, the eager-load queries and the STI type condition
+(captured from `ActiveSupport::Notifications` with prepared statements disabled so
+bind values inline). The deterministic, Ruby-free golden vectors alone keep
 coverage at 100%, so the cross-arch (qemu) and Windows CI lanes — where no MRI is
 present — still pass the gate.
 
